@@ -1,0 +1,657 @@
+
+--========================================================
+-- 💣 REXZ GOLD FAKE BOMB + COILS
+-- FULL SCRIPT | Roblox Studio Lite
+-- Location: StarterPlayer > StarterPlayerScripts
+--========================================================
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- SETTINGS
+local cooldown = 3
+local bombColor = Color3.fromRGB(212, 170, 55)
+local effectColor = Color3.fromRGB(255, 205, 80)
+
+local GREEN = Color3.fromRGB(164, 211, 151)
+local BLACK = Color3.fromRGB(31, 29, 25)
+local WHITE = Color3.fromRGB(255, 255, 255)
+local DARK_GOLD = Color3.fromRGB(133, 95, 25)
+
+local activeBombs = {}
+local lastUse = -math.huge
+local busy = false
+local opened = false
+local animating = false
+local restoring = false
+
+-- COIL SETTINGS
+local coilSettings = {
+    Speed = 32,
+    Gravity = 100
+}
+
+local coilTools = {
+    ["Speed Coil"] = false,
+    ["Gravity Coil"] = false
+}
+
+local colors = {
+    {Name="Gold", Color=Color3.fromRGB(212,170,55)},
+    {Name="Red", Color=Color3.fromRGB(220,65,65)},
+    {Name="Blue", Color=Color3.fromRGB(65,135,235)},
+    {Name="Green", Color=Color3.fromRGB(70,180,100)},
+    {Name="Purple", Color=Color3.fromRGB(160,85,220)},
+    {Name="Pink", Color=Color3.fromRGB(245,120,180)},
+    {Name="White", Color=Color3.fromRGB(240,240,240)},
+    {Name="Black", Color=Color3.fromRGB(35,35,40)},
+    {Name="Orange", Color=Color3.fromRGB(255,145,40)},
+    {Name="Cyan", Color=Color3.fromRGB(50,210,220)}
+}
+
+-- REMOVE OLD GUI
+local oldGui = playerGui:FindFirstChild("GoldBombUI")
+if oldGui then oldGui:Destroy() end
+
+--========================================================
+-- BOMB MODEL
+--========================================================
+
+local function makeBomb(parent, name)
+    local bomb = Instance.new("Part")
+    bomb.Name = name or "Handle"
+    bomb.Size = Vector3.new(1.45, 0.85, 1.8)
+    bomb.Color = bombColor
+    bomb.Material = Enum.Material.Metal
+    bomb.Anchored = false
+    bomb.CanCollide = true
+    bomb.TopSurface = Enum.SurfaceType.Smooth
+    bomb.BottomSurface = Enum.SurfaceType.Smooth
+    bomb.Parent = parent
+
+    local cap = Instance.new("Part")
+    cap.Name = "BombCap"
+    cap.Size = Vector3.new(0.42, 0.18, 0.42)
+    cap.Color = bombColor:Lerp(DARK_GOLD, 0.45)
+    cap.Material = Enum.Material.Metal
+    cap.Anchored = false
+    cap.CanCollide = false
+    cap.Massless = true
+    cap.CFrame = bomb.CFrame * CFrame.new(0, 0.49, 0)
+    cap.Parent = parent
+
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0 = bomb
+    weld.Part1 = cap
+    weld.Parent = cap
+
+    return bomb
+end
+
+local function recolorBombs()
+    for bomb in pairs(activeBombs) do
+        if bomb and bomb.Parent then
+            bomb.Color = bombColor
+            local cap = bomb:FindFirstChild("BombCap")
+            if cap then
+                cap.Color = bombColor:Lerp(DARK_GOLD, 0.45)
+            end
+        else
+            activeBombs[bomb] = nil
+        end
+    end
+
+    local backpack = player:FindFirstChildOfClass("Backpack")
+    local character = player.Character
+    local tool = backpack and backpack:FindFirstChild("Gold Fake Bomb")
+
+    if not tool and character then
+        tool = character:FindFirstChild("Gold Fake Bomb")
+    end
+
+    local handle = tool and tool:FindFirstChild("Handle")
+    if handle then
+        handle.Color = bombColor
+        local cap = tool:FindFirstChild("BombCap")
+        if cap then
+            cap.Color = bombColor:Lerp(DARK_GOLD, 0.45)
+        end
+    end
+end
+
+local function createExplosion(position)
+    local effect = Instance.new("Part")
+    effect.Name = "GoldBombExplosionEffect"
+    effect.Shape = Enum.PartType.Ball
+    effect.Size = Vector3.new(1, 1, 1)
+    effect.Position = position
+    effect.Anchored = true
+    effect.CanCollide = false
+    effect.CanTouch = false
+    effect.CanQuery = false
+    effect.Material = Enum.Material.Neon
+    effect.Color = effectColor
+    effect.Transparency = 0.15
+    effect.Parent = workspace
+
+    local attachment = Instance.new("Attachment")
+    attachment.Parent = effect
+
+    local particles = Instance.new("ParticleEmitter")
+    particles.Color = ColorSequence.new(effectColor)
+    particles.LightEmission = 0.35
+    particles.Lifetime = NumberRange.new(0.3, 0.7)
+    particles.Speed = NumberRange.new(5, 11)
+    particles.SpreadAngle = Vector2.new(180, 180)
+    particles.Rate = 0
+    particles.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.3),
+        NumberSequenceKeypoint.new(1, 0)
+    })
+    particles.Parent = attachment
+    particles:Emit(28)
+
+    TweenService:Create(
+        effect,
+        TweenInfo.new(0.45, Enum.EasingStyle.Quad,
+            Enum.EasingDirection.Out),
+        {Size = Vector3.new(8, 8, 8), Transparency = 1}
+    ):Play()
+
+    Debris:AddItem(effect, 1)
+end
+
+local function createBombTool()
+    local backpack = player:WaitForChild("Backpack")
+    local character = player.Character
+
+    if backpack:FindFirstChild("Gold Fake Bomb")
+        or (character and character:FindFirstChild("Gold Fake Bomb")) then
+        return
+    end
+
+    local tool = Instance.new("Tool")
+    tool.Name = "Gold Fake Bomb"
+    tool.ToolTip = "Drop your gold fake bomb"
+    tool.RequiresHandle = true
+    tool.CanBeDropped = false
+
+    local handle = makeBomb(tool, "Handle")
+    handle.Massless = true
+    handle.CanCollide = false
+    tool.Grip = CFrame.new(0, -0.2, -0.2)
+
+    tool.Activated:Connect(function()
+        if busy or os.clock() - lastUse < cooldown then return end
+
+        local char = player.Character
+        local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+
+        if not humanoid or humanoid.Health <= 0 or not root then return end
+
+        busy = true
+        lastUse = os.clock()
+
+        local dropped = makeBomb(workspace, "DroppedGoldFakeBomb")
+        dropped.CFrame = root.CFrame * CFrame.new(0, -2.7, -0.7)
+        activeBombs[dropped] = true
+        dropped.AssemblyLinearVelocity =
+            root.AssemblyLinearVelocity + root.CFrame.LookVector * 1.5
+
+        task.delay(0.8, function()
+            if dropped and dropped.Parent then
+                local position = dropped.Position
+                createExplosion(position)
+                activeBombs[dropped] = nil
+                dropped:Destroy()
+            end
+        end)
+
+        task.delay(math.max(cooldown, 0.1), function()
+            busy = false
+        end)
+    end)
+
+    tool.Parent = backpack
+end
+
+--========================================================
+-- COIL TOOLS
+--========================================================
+
+local function findCoil(name)
+    local backpack = player:FindFirstChildOfClass("Backpack")
+    local character = player.Character
+    return (backpack and backpack:FindFirstChild(name))
+        or (character and character:FindFirstChild(name))
+end
+
+local function createCoil(kind)
+    local name = kind .. " Coil"
+    if findCoil(name) then return false end
+
+    local isSpeed = kind == "Speed"
+    local color = isSpeed
+        and Color3.fromRGB(235, 65, 65)
+        or Color3.fromRGB(65, 145, 255)
+
+    local tool = Instance.new("Tool")
+    tool.Name = name
+    tool.ToolTip = "Equip to activate " .. name
+    tool.RequiresHandle = true
+    tool.CanBeDropped = false
+
+    local handle = Instance.new("Part")
+    handle.Name = "Handle"
+    handle.Size = Vector3.new(0.4, 1.2, 0.4)
+    handle.Shape = Enum.PartType.Cylinder
+    handle.Color = color
+    handle.Material = Enum.Material.SmoothPlastic
+    handle.CanCollide = false
+    handle.Massless = true
+    handle.Parent = tool
+
+    -- Spring-like colored coils
+    for i = 1, 12 do
+        local angle = i * math.pi * 0.8
+        local y = -0.5 + (i - 1) * 0.09
+
+        local segment = Instance.new("Part")
+        segment.Name = "SpringSegment"
+        segment.Shape = Enum.PartType.Ball
+        segment.Size = Vector3.new(0.22, 0.22, 0.22)
+        segment.Color = color
+        segment.Material = Enum.Material.SmoothPlastic
+        segment.CanCollide = false
+        segment.Massless = true
+        segment.CFrame = handle.CFrame * CFrame.new(
+            math.cos(angle) * 0.25,
+            y,
+            math.sin(angle) * 0.25
+        )
+        segment.Parent = tool
+
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = handle
+        weld.Part1 = segment
+        weld.Parent = segment
+    end
+
+    local equipped = false
+    local activeHumanoid
+    local previousSpeed
+    local previousGravity
+
+    local function deactivate()
+        if not equipped then return end
+        equipped = false
+
+        if isSpeed then
+            if activeHumanoid and activeHumanoid.Parent then
+                activeHumanoid.WalkSpeed = previousSpeed or 16
+            end
+        else
+            workspace.Gravity = previousGravity or 196.2
+        end
+
+        activeHumanoid = nil
+    end
+
+    tool.Equipped:Connect(function()
+        local character = player.Character
+        local humanoid = character
+            and character:FindFirstChildOfClass("Humanoid")
+
+        if not humanoid or humanoid.Health <= 0 then return end
+
+        equipped = true
+        activeHumanoid = humanoid
+
+        if isSpeed then
+            previousSpeed = humanoid.WalkSpeed
+            humanoid.WalkSpeed = coilSettings.Speed
+        else
+            previousGravity = workspace.Gravity
+            workspace.Gravity = coilSettings.Gravity
+        end
+    end)
+
+    tool.Unequipped:Connect(deactivate)
+    tool.Destroying:Connect(deactivate)
+
+    tool.Parent = player:WaitForChild("Backpack")
+    return true
+end
+
+local function removeCoil(kind)
+    local name = kind .. " Coil"
+    local tool = findCoil(name)
+    if tool then tool:Destroy() end
+    coilTools[name] = false
+end
+
+local function addCoil(kind)
+    local name = kind .. " Coil"
+    if findCoil(name) then return false end
+    if createCoil(kind) then
+        coilTools[name] = true
+        return true
+    end
+    return false
+end
+
+--========================================================
+-- RESET / RESPAWN RECOVERY
+--========================================================
+
+local function restoreTools()
+    if restoring then return end
+    restoring = true
+
+    task.spawn(function()
+        local character = player.Character or player.CharacterAdded:Wait()
+        player:WaitForChild("Backpack")
+        task.wait(1)
+
+        if player.Character == character then
+            createBombTool()
+
+            for name, enabled in pairs(coilTools) do
+                if enabled and not findCoil(name) then
+                    createCoil(name:gsub(" Coil", ""))
+                end
+            end
+        end
+
+        restoring = false
+    end)
+end
+
+restoreTools()
+
+player.CharacterAdded:Connect(function()
+    restoreTools()
+end)
+
+task.spawn(function()
+    while player.Parent do
+        task.wait(2)
+
+        local character = player.Character
+        local humanoid = character
+            and character:FindFirstChildOfClass("Humanoid")
+
+        if character and humanoid and humanoid.Health > 0 then
+            if not findCoil("Speed Coil") and coilTools["Speed Coil"] then
+                addCoil("Speed")
+            end
+            if not findCoil("Gravity Coil") and coilTools["Gravity Coil"] then
+                addCoil("Gravity")
+            end
+            if not findCoil("Gold Fake Bomb") then
+                createBombTool()
+            end
+        end
+    end
+end)
+
+--========================================================
+-- SETTINGS GUI
+--========================================================
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "GoldBombUI"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 20
+gui.Parent = playerGui
+
+local toggle = Instance.new("TextButton")
+toggle.Name = "SettingsToggle"
+toggle.Size = UDim2.fromOffset(43, 53)
+toggle.Position = UDim2.new(1, -45, 0.5, -26)
+toggle.BackgroundColor3 = GREEN
+toggle.Text = "<"
+toggle.TextColor3 = BLACK
+toggle.TextSize = 29
+toggle.Font = Enum.Font.GothamBold
+toggle.Parent = gui
+
+Instance.new("UICorner", toggle).CornerRadius = UDim.new(0, 13)
+
+local toggleStroke = Instance.new("UIStroke")
+toggleStroke.Color = WHITE
+toggleStroke.Thickness = 1.5
+toggleStroke.Parent = toggle
+
+local panel = Instance.new("ScrollingFrame")
+panel.Name = "SettingsPanel"
+panel.Size = UDim2.new(0, 265, 0, 370)
+panel.Position = UDim2.new(1, 275, 0.5, -185)
+panel.BackgroundColor3 = Color3.fromRGB(239, 248, 234)
+panel.BorderSizePixel = 0
+panel.ScrollBarThickness = 4
+panel.ScrollBarImageColor3 = GREEN
+panel.CanvasSize = UDim2.new(0, 0, 0, 555)
+panel.Parent = gui
+
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 17)
+
+local panelStroke = Instance.new("UIStroke")
+panelStroke.Color = GREEN
+panelStroke.Thickness = 2
+panelStroke.Parent = panel
+
+local padding = Instance.new("UIPadding")
+padding.PaddingLeft = UDim.new(0, 12)
+padding.PaddingRight = UDim.new(0, 12)
+padding.PaddingTop = UDim.new(0, 12)
+padding.Parent = panel
+
+local function makeLabel(text, y, height)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 0, height or 24)
+    label.Position = UDim2.fromOffset(0, y)
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = BLACK
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 13
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = panel
+    return label
+end
+
+local title = makeLabel("REXZ GOLD BOMB", 0, 30)
+title.TextSize = 15
+
+local close = Instance.new("TextButton")
+close.Size = UDim2.fromOffset(26, 26)
+close.Position = UDim2.new(1, -26, 0, 0)
+close.BackgroundColor3 = Color3.fromRGB(218, 235, 210)
+close.Text = "×"
+close.TextColor3 = BLACK
+close.TextSize = 20
+close.Font = Enum.Font.GothamBold
+close.Parent = panel
+Instance.new("UICorner", close).CornerRadius = UDim.new(0, 8)
+
+makeLabel("Cooldown (0–50 seconds)", 36)
+
+local input = Instance.new("TextBox")
+input.Name = "CooldownInput"
+input.Size = UDim2.new(1, 0, 0, 34)
+input.Position = UDim2.fromOffset(0, 61)
+input.BackgroundColor3 = WHITE
+input.TextColor3 = BLACK
+input.PlaceholderText = "Enter 0 to 50"
+input.Text = tostring(cooldown)
+input.ClearTextOnFocus = false
+input.Font = Enum.Font.Gotham
+input.TextSize = 14
+input.Parent = panel
+Instance.new("UICorner", input).CornerRadius = UDim.new(0, 8)
+
+local apply = Instance.new("TextButton")
+apply.Name = "ApplyCooldown"
+apply.Size = UDim2.new(1, 0, 0, 32)
+apply.Position = UDim2.fromOffset(0, 102)
+apply.BackgroundColor3 = GREEN
+apply.Text = "APPLY COOLDOWN"
+apply.TextColor3 = BLACK
+apply.Font = Enum.Font.GothamBold
+apply.TextSize = 12
+apply.Parent = panel
+Instance.new("UICorner", apply).CornerRadius = UDim.new(0, 8)
+
+local status = makeLabel("Ready!", 137, 20)
+status.Font = Enum.Font.Gotham
+status.TextSize = 11
+
+-- COLOR PALETTES
+local function createPalette(titleText, startY, isBomb)
+    makeLabel(titleText, startY, 24)
+
+    for i, info in ipairs(colors) do
+        local row = math.floor((i - 1) / 5)
+        local col = (i - 1) % 5
+
+        local button = Instance.new("TextButton")
+        button.Name = info.Name ..
+            (isBomb and "BombColor" or "EffectColor")
+        button.Size = UDim2.fromOffset(39, 34)
+        button.Position = UDim2.fromOffset(
+            col * 45, startY + 28 + row * 40
+        )
+        button.BackgroundColor3 = info.Color
+        button.Text = ""
+        button.Parent = panel
+
+        Instance.new("UICorner", button).CornerRadius = UDim.new(0, 8)
+
+        local outline = Instance.new("UIStroke")
+        outline.Color = WHITE
+        outline.Thickness = 1
+        outline.Parent = button
+
+        button.Activated:Connect(function()
+            if isBomb then
+                bombColor = info.Color
+                recolorBombs()
+                status.Text = "Bomb color: " .. info.Name
+            else
+                effectColor = info.Color
+                status.Text = "Effect color: " .. info.Name
+            end
+            status.TextColor3 = Color3.fromRGB(70, 110, 58)
+        end)
+    end
+end
+
+createPalette("BOMB COLOR", 165, true)
+createPalette("EXPLOSION COLOR", 285, false)
+
+makeLabel("COIL TOOLS", 440, 24)
+
+local function makeCoilButton(name, text, x, y, color, callback)
+    local button = Instance.new("TextButton")
+    button.Name = name
+    button.Size = UDim2.new(0.5, -5, 0, 34)
+    button.Position = UDim2.fromOffset(x, y)
+    button.BackgroundColor3 = color
+    button.Text = text
+    button.TextColor3 = WHITE
+    button.Font = Enum.Font.GothamBold
+    button.TextSize = 10
+    button.Parent = panel
+
+    Instance.new("UICorner", button).CornerRadius = UDim.new(0, 8)
+    button.Activated:Connect(callback)
+    return button
+end
+
+local coilRed = Color3.fromRGB(205, 75, 75)
+local coilBlue = Color3.fromRGB(65, 125, 220)
+local coilGray = Color3.fromRGB(105, 110, 105)
+
+makeCoilButton("AddSpeedCoil", "+ SPEED COIL", 0, 468,
+    coilRed, function()
+        status.Text = addCoil("Speed")
+            and "Speed Coil added!"
+            or "Speed Coil already exists!"
+    end)
+
+makeCoilButton("RemoveSpeedCoil", "- SPEED COIL", 125, 468,
+    coilGray, function()
+        removeCoil("Speed")
+        status.Text = "Speed Coil removed!"
+    end)
+
+makeCoilButton("AddGravityCoil", "+ GRAVITY COIL", 0, 508,
+    coilBlue, function()
+        status.Text = addCoil("Gravity")
+            and "Gravity Coil added!"
+            or "Gravity Coil already exists!"
+    end)
+
+makeCoilButton("RemoveGravityCoil", "- GRAVITY COIL", 125, 508,
+    coilGray, function()
+        removeCoil("Gravity")
+        status.Text = "Gravity Coil removed!"
+    end)
+
+makeLabel("Tap a color to change it.", 548, 25)
+
+apply.Activated:Connect(function()
+    local value = tonumber(input.Text)
+
+    if not value or value < 0 or value > 50 then
+        status.Text = "Enter a number from 0 to 50!"
+        status.TextColor3 = Color3.fromRGB(190, 65, 65)
+        return
+    end
+
+    cooldown = math.floor(value)
+    input.Text = tostring(cooldown)
+    status.Text = "Cooldown: " .. cooldown .. " seconds"
+    status.TextColor3 = Color3.fromRGB(70, 110, 58)
+end)
+
+-- PANEL ANIMATION
+local openPosition = UDim2.new(1, -275, 0.5, -185)
+local closedPosition = UDim2.new(1, 275, 0.5, -185)
+
+local function setPanel(state)
+    if animating or opened == state then return end
+
+    opened = state
+    animating = true
+    toggle.Text = state and ">" or "<"
+
+    local tween = TweenService:Create(
+        panel,
+        TweenInfo.new(0.32, Enum.EasingStyle.Quint,
+            Enum.EasingDirection.Out),
+        {Position = state and openPosition or closedPosition}
+    )
+
+    tween:Play()
+    tween.Completed:Connect(function()
+        animating = false
+    end)
+end
+
+toggle.Activated:Connect(function()
+    setPanel(not opened)
+end)
+
+close.Activated:Connect(function()
+    setPanel(false)
+end)
+
+print("REXZ Gold Fake Bomb + Coils loaded!")
